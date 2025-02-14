@@ -53,3 +53,22 @@ void startCaptivePortal() {
     server.stop();
     dnsServer.stop();
 }
+
+void connectToWiFi() {
+    preferences.begin("wifi", false);
+    String ssid = preferences.getString("ssid", "");
+    String pass = preferences.getString("pass", "");
+    if(ssid.length() == 0) {
+        startCaptivePortal();
+    }
+    Serial.println("Connecting to WiFi...");
+    WiFi.begin(preferences.getString("ssid").c_str(), preferences.getString("pass").c_str());
+    for(int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) {
+        delay(500);
+        Serial.print(".");
+    }
+    if(WiFi.status() != WL_CONNECTED) {
+        startCaptivePortal();
+    }
+    Serial.println("Connected to WiFi");
+}
