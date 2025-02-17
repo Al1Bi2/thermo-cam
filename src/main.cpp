@@ -40,6 +40,7 @@ void browseService(const char *service, const char *proto) {
       Serial.print("  ");
       Serial.print(i + 1);
       Serial.print(": ");
+
       Serial.print(MDNS.txt(i,0));
       Serial.print(" - ");
       Serial.print(MDNS.hostname(i));
@@ -48,9 +49,53 @@ void browseService(const char *service, const char *proto) {
       Serial.print(":");
       Serial.print(MDNS.port(i));
       Serial.println(")");
+
+      for(int j = 0; j < MDNS.numTxt(i); j++){
+        Serial.print(MDNS.txtKey(i, j));
+        Serial.print(" - ");
+        Serial.println(MDNS.txt(i, j));
+        Serial.print("; ");
+      }
+      Serial.println();
     }
   }
   Serial.println();
+
+  
+}
+
+void find_servers(){
+  if (!MDNS.begin(unique_id.c_str())) {
+    Serial.println("Error setting up MDNS responder!");
+    delay(1000);
+    ESP.restart();
+  }
+  Serial.println("mDNS responder started");
+  
+  int n = 0;
+  int found = -1;
+  do{
+    n = MDNS.queryService("http", "tcp");
+    for (int i = 0; i < n; ++i) {
+      if(MDNS.hostname(i) == "thermocam-server"){
+        found = i;
+      }
+    }
+  } while(found == -1);
+
+
+  Serial.print("Found server: ");
+  Serial.println(MDNS.hostname(found));
+  Serial.print("IP: ");
+  Serial.println(MDNS.IP(found).toString());
+  WebServer server(80);
+  server.send(200, "text/plain", String(unique_id) + "\n" + WiFi.localIP().toString());
+  MDNS.end();
+  Serial.println("mDNS responder stopped");
+
+  MQTTBrokerIP = MDNS.IP(found).toString();
+
+
 }
 
 void setup() {
@@ -62,8 +107,8 @@ void setup() {
   Serial.printf("Unique ID: %s\n", unique_id.c_str());
   Serial.println("Start");
 
-  connectToWiFi();
-
+  connectToWiFi(unique_id);
+  connect_mqtt();
   if (!MDNS.begin(unique_id.c_str())) {
     Serial.println("Error setting up MDNS responder!");
     delay(1000);
@@ -72,10 +117,12 @@ void setup() {
   Serial.println("mDNS responder started");
   MDNS.addService("http", "tcp", 80);
 
-  browseService("mqtt", "tcp");
-  browseService("http", "tcp");
-  
-  xTaskCreatePinnedToCore(loopMQTT, "amg8833", 4096, NULL, 2, NULL, 1);
+  //browseService("mqtt", "tcp");
+  //browseService("http", "tcp");
+  MDNS.end();
+  Serial.println("finished");
+  delay(100);
+  setup_mqtt();
   xTaskCreatePinnedToCore(streaming_task, "streaming_task", 4096, NULL, 2, NULL, 1);
 
 
