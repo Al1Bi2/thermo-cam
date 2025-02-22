@@ -64,13 +64,8 @@ void browseService(const char *service, const char *proto) {
   
 }
 
-void find_servers(){
-  if (!MDNS.begin(unique_id.c_str())) {
-    Serial.println("Error setting up MDNS responder!");
-    delay(1000);
-    ESP.restart();
-  }
-  Serial.println("mDNS responder started");
+void find_server(){
+ 
   
   int n = 0;
   int found = -1;
@@ -80,6 +75,8 @@ void find_servers(){
       if(MDNS.hostname(i) == "thermocam-server"){
         found = i;
       }
+      Serial.println(MDNS.hostname(i));
+      delay(100);
     }
   } while(found == -1);
 
@@ -89,10 +86,9 @@ void find_servers(){
   Serial.print("IP: ");
   Serial.println(MDNS.IP(found).toString());
   WebServer server(80);
-  server.send(200, "text/plain", String(unique_id) + "\n" + WiFi.localIP().toString());
+
   MDNS.end();
   Serial.println("mDNS responder stopped");
-
   MQTTBrokerIP = MDNS.IP(found).toString();
 
 
@@ -102,34 +98,30 @@ void setup() {
   delay(2000);
   Serial.begin(115200);
   Serial.setDebugOutput(true);
-
+  
   get_unique_id();
   Serial.printf("Unique ID: %s\n", unique_id.c_str());
   Serial.println("Start");
 
   connectToWiFi(unique_id);
-  connect_mqtt();
   if (!MDNS.begin(unique_id.c_str())) {
     Serial.println("Error setting up MDNS responder!");
     delay(1000);
     ESP.restart();
+    MDNS.addService("http", "tcp", 80);
   }
-  Serial.println("mDNS responder started");
   MDNS.addService("http", "tcp", 80);
+  Serial.println("mDNS responder started");
+  find_server();
+  connect_mqtt();
 
-  //browseService("mqtt", "tcp");
-  //browseService("http", "tcp");
-  MDNS.end();
-  Serial.println("finished");
   delay(100);
   setup_mqtt();
-  xTaskCreatePinnedToCore(streaming_task, "streaming_task", 4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(streaming_task, "streaming_task", 2800, NULL, 2, NULL, 1);
 
 
 }
 
 void loop() {
-  vTaskDelay(1000);
-
 }
 

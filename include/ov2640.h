@@ -39,7 +39,7 @@ camera_config_t default_config{
   .fb_count = 2,
   .fb_location = CAMERA_FB_IN_PSRAM,
 
-  .grab_mode = CAMERA_GRAB_WHEN_EMPTY
+  .grab_mode = CAMERA_GRAB_LATEST
 
 };
 class OV2640{
@@ -92,6 +92,9 @@ public:
   uint8_t* get_buffer(){
     run_with_check();
     return fb->buf;
+  }
+  void free_buffer(){
+    esp_camera_fb_return(fb);
   }
   void save_config(){
     esp_camera_save_to_nvs("OV2640");

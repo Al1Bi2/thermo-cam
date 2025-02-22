@@ -34,9 +34,9 @@ void handleSave() {String ssid = server.arg("ssid");
     }
 }
 
-void startCaptivePortal() {
+void startCaptivePortal(String hostname) {
     Serial.println("Starting Captive Portal...");
-    WiFi.softAP("ESP32-CAM-Setup");
+    WiFi.softAP(hostname);
     dnsServer.start(53, "*", WiFi.softAPIP());
     Serial.print("ESP32 IP as soft AP: ");
     Serial.println(WiFi.softAPIP());
@@ -54,12 +54,12 @@ void startCaptivePortal() {
     dnsServer.stop();
 }
 
-void connectToWiFi() {
+void connectToWiFi(String hostname) {
     preferences.begin("wifi", false);
     String ssid = preferences.getString("ssid", "");
     String pass = preferences.getString("pass", "");
     if(ssid.length() == 0) {
-        startCaptivePortal();
+        startCaptivePortal(hostname);
     }
     Serial.println("Connecting to WiFi...");
     WiFi.begin(preferences.getString("ssid").c_str(), preferences.getString("pass").c_str());
@@ -67,8 +67,8 @@ void connectToWiFi() {
         delay(500);
         Serial.print(".");
     }
-    if(WiFi.status() != WL_CONNECTED) {
-        startCaptivePortal();
+    if(!WiFi.isConnected()) {
+        startCaptivePortal(hostname);
     }
     Serial.println("Connected to WiFi");
 }

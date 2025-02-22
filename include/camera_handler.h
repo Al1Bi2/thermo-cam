@@ -22,7 +22,7 @@ const int bdrLen = strlen(BOUNDARY);
 const int cntLen = strlen(CTNTTYPE);
 
 OV2640 camera;
-volatile int FPS = 10;
+volatile int FPS = 25;
 
 volatile size_t frame_size;   
 volatile uint8_t* frame_buffer;    
@@ -51,7 +51,7 @@ void camera_setup(){
 void camera_task(void* pvParameters){
     camera_setup();
     TickType_t xLastWakeTime;
-    const TickType_t xFrequency = pdMS_TO_TICKS(1000 / FPS);
+    const TickType_t xFrequency = pdMS_TO_TICKS(1000 / FPS/10);
     uint8_t* fb_buffer[2];
     size_t fSize[2] = { 0, 0 };
     int fb_idx = 0;
@@ -72,7 +72,7 @@ void camera_task(void* pvParameters){
         memcpy(fb_buffer[fb_idx],frame,fb_size);
         taskYIELD();
 
-        xTaskDelayUntil(&xLastWakeTime, xFrequency);
+        //xTaskDelayUntil(&xLastWakeTime, xFrequency);
 
         //Serial.println("Camera, entering critical section");
 
@@ -133,7 +133,7 @@ void mjpeg_task(void* pvParameters){
     while(true){
         xFrequency = pdMS_TO_TICKS(1000 / FPS);
         UBaseType_t active_clients = uxQueueMessagesWaiting(streamingClients);
-        Serial.print("CH: active clients: "); Serial.println(active_clients);
+        //Serial.print("CH: active clients: "); Serial.println(active_clients);
         if(active_clients){
             xFrequency /= active_clients;
 
@@ -166,10 +166,6 @@ void mjpeg_task(void* pvParameters){
     }
 }
 void handle_jpeg_stream(){
-    if(!uxQueueSpacesAvailable(streamingClients)){
-        return;
-    }
-
     Serial.println("CH: handle_jpeg_stream:new client");
     WiFiClient* client = new WiFiClient();
     *client = cam_server.client();
@@ -187,6 +183,31 @@ void handle_jpeg_stream(){
         vTaskResume(tStream);
     }
 }
+
+void handle_jpeg_stream_simple(){
+    char buf[32];
+    int size = 0;
+    WiFiClient* client = new WiFiClient();
+    *client = cam_server.client();
+
+    client->write(HEADER, hdrLen);
+    client->write(BOUNDARY, bdrLen);
+    while (true)
+    {  
+        if(!client->connected()) break;
+        camera.run();
+        size = camera.get_fb_size();
+
+        client->write(CTNTTYPE, cntLen);
+        sprintf( buf, "%d\r\n\r\n", size);
+        client->write(buf, strlen(buf));
+        client->write(const_cast<uint8_t*>(camera.get_buffer()), size);
+        client->write(BOUNDARY, bdrLen);
+        delay(10);
+        Serial.println("poop");
+    }
+    
+}
 void handleNotFound()
 {
   String message = "Server is running!\n\n";
@@ -200,6 +221,7 @@ void handleNotFound()
   cam_server.send(200, "text / plain", message);
 }
 void streaming_task(void* pvParameters){
+    camera_setup();
     Serial.println("Streaming task started");
     TickType_t xLastWakeTime;
     const TickType_t xFrequency = pdMS_TO_TICKS(100);
@@ -209,7 +231,7 @@ void streaming_task(void* pvParameters){
 
     streamingClients = xQueueCreate( 10, sizeof(WiFiClient*) );
     Serial.println("Starting camera task ...");
-    xTaskCreatePinnedToCore(
+   /* xTaskCreatePinnedToCore(
         camera_task,        
         "camera_task",       
         4096,         
@@ -228,9 +250,10 @@ void streaming_task(void* pvParameters){
         3,
         &tStream,
         1);
+ */
 
     //  Registering webcam_server handling routines
-    cam_server.on("/mjpeg/1", HTTP_GET, handle_jpeg_stream);
+    cam_server.on("/mjpeg/1", HTTP_GET, handle_jpeg_stream_simple);
     cam_server.onNotFound(handleNotFound);
 
 
@@ -241,7 +264,7 @@ void streaming_task(void* pvParameters){
     while(true) {
         //Serial.println("CH:Looping");
         cam_server.handleClient();
-        taskYIELD();
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        //taskYIELD();
+        //vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
