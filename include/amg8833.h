@@ -1,5 +1,5 @@
 #pragma once
-
+#include <Arduino.h>
 #include <Wire.h> 
 #include <array>
 #define AMG8833_ADDRESS 0x69
@@ -67,6 +67,35 @@ public:
     void set_mode(POWER_MODE mode){
         write_register(POWER_CONTROL_REGISTER,static_cast<uint8_t>(mode));
     }
+    void set_settings(const char* key,int value){
+        if(strcmp(key,"framerate") == 0){
+            switch (value)
+            {
+            case static_cast<int>(FRAMERATE::FPS_10):
+            case static_cast<int>(FRAMERATE::FPS_1):
+                set_framerate(static_cast<FRAMERATE>(value));
+                break;
+            default:
+                Serial.println("Invalid framerate");
+                break;
+            }
+            
+        }
+        if(strcmp(key,"mode") == 0){
+            switch (value)
+            {
+            case static_cast<int>(POWER_MODE::WAKE):
+            case static_cast<int>(POWER_MODE::SLEEP):
+            case static_cast<int>(POWER_MODE::STAND_BY_60_SEC):
+            case static_cast<int>(POWER_MODE::STAND_BY_10_SEC):
+                set_mode(static_cast<POWER_MODE>(value));
+                break;
+            default:
+                Serial.println("Invalid mode");
+                break;
+            }
+        }
+    };
     std::array<std::array<float, 8>, 8> get_matrix(){
 
         std::array<std::array<float, 8>, 8> temp_matrix;

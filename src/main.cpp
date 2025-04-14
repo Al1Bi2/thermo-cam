@@ -11,20 +11,16 @@
 
 #include <captive_portal/captive_portal.h>
 #include <mqtt_handle.h>
+
 #include <camera_handler.h>
 Preferences preferences;
 String unique_id;
 
 void get_unique_id(){
-  unique_id = WiFi.macAddress();
-  unique_id.replace(":","");
-  unique_id = "esp32-" + unique_id;
+  String mac_id = WiFi.macAddress();
+  mac_id.replace(":","");
+  unique_id = "esp32-" + mac_id;
 }
-/*void get_efuse_numeric_id(){
-  uint64_t num_id = 0LL;
-  esp_efuse_mac_get_default((uint8_t*) (&num_id));
-  unique_id = String(num_id, HEX);
-}*/
 
 
 void browseService(const char *service, const char *proto) {
@@ -65,15 +61,25 @@ void browseService(const char *service, const char *proto) {
 }
 
 void find_server(){
- 
+  if (!MDNS.begin(unique_id.c_str())) {
+    Serial.println("Error setting up MDNS responder!");
+    delay(1000);
+    ESP.restart();
+  }
+  MDNS.addService("http", "tcp", 80);
+  Serial.println("mDNS responder started");
   
   int n = 0;
   int found = -1;
   do{
     n = MDNS.queryService("http", "tcp");
     for (int i = 0; i < n; ++i) {
-      if(MDNS.hostname(i) == "thermocam-server"){
-        found = i;
+      if(MDNS.hostname(i) == "thermocam-server") {
+        if(MDNS.IP(i)!=0){
+          found = i;
+        }else{
+          Serial.println("Strange bug: MDNS.hostname(i) == \"thermocam-server\" but MDNS.IP(i)==0.0.0.0");
+        }
       }
       Serial.println(MDNS.hostname(i));
       delay(100);
@@ -93,7 +99,9 @@ void find_server(){
 
 
 }
+void connection_task(void *pvParameters){
 
+}
 void setup() {
   delay(2000);
   Serial.begin(115200);
@@ -104,14 +112,6 @@ void setup() {
   Serial.println("Start");
 
   connectToWiFi(unique_id);
-  if (!MDNS.begin(unique_id.c_str())) {
-    Serial.println("Error setting up MDNS responder!");
-    delay(1000);
-    ESP.restart();
-    MDNS.addService("http", "tcp", 80);
-  }
-  MDNS.addService("http", "tcp", 80);
-  Serial.println("mDNS responder started");
   find_server();
   connect_mqtt();
 

@@ -2,11 +2,11 @@
 #include <amg8833.h>
 #include <json_generator.h>
 #include <PubSubClient.h>
-
-
+#include "cJSON.h"
+#include "OV2640.h"
 #define LASTWILL_MESSAGE "offline"
 #define LASTWILL_QOS 1
-
+ 
 
 
 #define evtADCreading      ( 1 << 3 )
@@ -17,20 +17,21 @@ WiFiClient      wifiClient;
 PubSubClient    mqtt_client(wifiClient);
 AMG8833 amg8833;
 extern String unique_id;
-
+extern OV2640 camera;
 const int AMG8833_FREQ = 2000;
 
 SemaphoreHandle_t mut_connected;
 
 bool isConnected = false;
-uint8_t notConnectedCount = 0;
+uint8_t notConnectedCount = 6;
 
 TaskHandle_t send_matrix_task;
 
 String CONNECT_TOPIC = String(unique_id+"/connect");
+String SETTINGS_TOPIC = String(unique_id+"/settings");
 
 struct struct_message{
-    char payload [300] = {'\0'};
+    char payload [500] = {'\0'};
     String topic;
 } incoming_message;
 
@@ -39,6 +40,8 @@ QueueHandle_t q_matrix;
 
 SemaphoreHandle_t sem_mqqt_busy;
 //SemaphoreHandle_t sem_mqqt_busy;
+
+
 
 void IRAM_ATTR mqtt_callback(char* topic, byte * payload, unsigned int length){
 
@@ -70,17 +73,51 @@ void connect_mqtt(){
         }
     }
     CONNECT_TOPIC = String(unique_id+"/connect");
+    SETTINGS_TOPIC = String(unique_id+"/settings");
     mqtt_client.setCallback(mqtt_callback);
     Serial.println(mqtt_client.subscribe("server/test",1));
     Serial.println(mqtt_client.subscribe(CONNECT_TOPIC.c_str(),0));
-
+    Serial.println(mqtt_client.subscribe(SETTINGS_TOPIC.c_str(),1));
     String message = unique_id+":"+WiFi.localIP().toString();
-    Serial.println(mqtt_client.publish("server/hostname", message.c_str()));
+    Serial.println(mqtt_client.publish("discovery", message.c_str()));
     
 }
 
 
 
+
+void parse_json_and_set_settings(const char* message){
+    std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(cJSON_Parse(message), cJSON_Delete);
+    if (!root) {
+        Serial.println("Ошибка парсинга JSON");
+        return;
+    }
+
+    // Проверяем, есть ли объект "camera"
+    cJSON* camera_obj = cJSON_GetObjectItem(root.get(), "camera");
+    if (camera_obj) {
+        cJSON* item = camera_obj->child; // Получаем первый элемент объекта "camera"
+        while (item) {
+            if (cJSON_IsNumber(item)) { // Проверяем, что значение – число
+                camera.set_settings(item->string, item->valueint);
+            }
+            item = item->next; // Переходим к следующему ключу
+        }
+    }
+
+    // Аналогично для "amg8833"
+    cJSON* amg8833_obj = cJSON_GetObjectItem(root.get(), "amg8833");
+    if (amg8833_obj) {
+        cJSON* item = amg8833_obj->child;
+        while (item) {
+            if (cJSON_IsNumber(item)) {
+                amg8833.set_settings(item->string, item->valueint);
+            }
+            item = item->next;
+        }
+    }
+
+}
 
 
 void handle_message(void * parameters){
@@ -100,9 +137,13 @@ void handle_message(void * parameters){
                 vTaskResume(send_matrix_task);
                 xSemaphoreGive( mut_connected );
             }
+            if(incoming_message.topic == SETTINGS_TOPIC){
+                parse_json_and_set_settings(incoming_message.payload);
+            }
         }
     }
 }
+
 
 void loop_mqtt(void * parameters) {
     Serial.println("MQTT loop started");
@@ -130,6 +171,8 @@ void loop_mqtt(void * parameters) {
         vTaskDelayUntil( &xLastWakeTime, xFrequency );
     }
 }
+
+
 void gett_matrix(void * parameters) {
 
     std::array<std::array<float, 8>, 8> matrix;// увеличивает потребление памяти, надо поискать в инете норм ли x3
@@ -154,7 +197,7 @@ void check_connection(void * parameters) {
         xSemaphoreTake( mut_connected, portMAX_DELAY );
         notConnectedCount++;
         if(notConnectedCount >= maxNoConnection){
-            isConnected = false;
+            isConnected = true;
             Serial.println("Server dont want to connect");
             vTaskSuspend( send_matrix_task );
         }
@@ -163,9 +206,12 @@ void check_connection(void * parameters) {
 
 }
 void send_matrix(void * parameters) {
-    std::array<std::array<float, 8>, 8> r_matrix;// увеличивает потребление памяти, надо поискать в инете норм ли — x2
+    std::array<std::array<float, 8>, 8> r_matrix;
     uint64_t last_time = esp_timer_get_time();
     uint64_t sleep_time = 200*1000;
+
+    std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(cJSON_CreateObject(), cJSON_Delete);
+    std::unique_ptr<cJSON, decltype(&cJSON_Delete)> matrix_array(cJSON_CreateArray(), cJSON_Delete);
     while(true){
 
         if(esp_timer_get_time() - last_time >= sleep_time){
@@ -175,28 +221,31 @@ void send_matrix(void * parameters) {
             Serial.println(xEventGroupGetBits( eg ));
         }
         if(xQueueReceive(q_matrix, &r_matrix, 0) == pdTRUE){
+            uint32_t t1 = micros();
+            cJSON *root = cJSON_CreateObject();
+            cJSON *matrix_array = cJSON_CreateArray();
             //Serial.println("Recieved matrix");
-            String json = "{ \"board\": \"" + unique_id + "\" , \"matrix\": [";
             
             for(int i = 0; i < 8; i++){
-                json+= "[";
+                cJSON *row_array = cJSON_CreateArray();
                 for(int j = 0; j < 8; j++){
-                    json += r_matrix[i][j];
-                    if(j != 7){
-                        json += ",";
-                    }
+                    cJSON_AddItemToArray(row_array, cJSON_CreateNumber(r_matrix[i][j]));
                 }
-                json += "]";
-                if(i != 7){
-                    json += ",";                
-                }
+                cJSON_AddItemToArray(matrix_array, row_array);
             }
-            json += "]}";
-            //Serial.println(json);
+            cJSON_AddItemToObject(root, "matrix", matrix_array);
+            char *json_string = cJSON_PrintUnformatted(root);
+            
+
             xSemaphoreTake( sem_mqqt_busy, portMAX_DELAY );
             String topic = unique_id + "/amg8833";
-            mqtt_client.publish(topic.c_str(), json.c_str());
+            Serial.println(sizeof(r_matrix));      
+            mqtt_client.publish(topic.c_str(), reinterpret_cast<const uint8_t*>(&r_matrix), sizeof(r_matrix));
+            uint32_t t2 = micros();
+            Serial.printf("JSON parse: %d μs\n", t2 - t1);
             xSemaphoreGive( sem_mqqt_busy );
+            cJSON_Delete(root);
+            free(json_string);  
         }
             
         taskYIELD();
@@ -212,6 +261,7 @@ void setup_mqtt() {
     q_Message = xQueueCreate( 1, sizeof(struct struct_message) );
     mut_connected = xSemaphoreCreateMutex();
     Serial.printf("Size of matrix: %d\n",sizeof(std::array<std::array<float, 8>, 8>)); 
+    
     xTaskCreatePinnedToCore(check_connection, "check_conn", 4906, NULL, 2, NULL, 1);
 
     xTaskCreatePinnedToCore(loop_mqtt, "loop_mqtt", 4906, NULL, 2, NULL, 1);
@@ -220,3 +270,5 @@ void setup_mqtt() {
     xTaskCreatePinnedToCore(send_matrix, "send_matrix", 4096, NULL, 2, &send_matrix_task, 1);
 
 }
+
+

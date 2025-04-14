@@ -2,7 +2,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <WiFiClient.h>
-#include "esp_camera.h"
+#include "esp_camera.h" 
 #include "esp_log.h"
 #include "esp_attr.h"
 
@@ -42,7 +42,7 @@ uint8_t* allocate_memory(uint8_t* requested_ptr, size_t requested_size);
 void camera_setup(){
     if (camera.init() != ESP_OK) {
         Serial.println("Error initializing the camera");
-        delay(10000);
+        delay(1000);
         ESP.restart();
       }
 }

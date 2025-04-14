@@ -55,6 +55,7 @@ public:
         printf("Camera probe failed with error 0x%x", err);
         return err;
     }
+    load_config();
     return ESP_OK;
   }
   void run(){
@@ -107,6 +108,20 @@ public:
   }
   void set_frame_size(framesize_t frame_size){
     config.frame_size = frame_size;
+  }
+  void set_settings(const char* key,int value){
+    sensor_t* s = esp_camera_sensor_get();
+    if(strcmp(key,"quality") == 0){
+      s->set_quality(s, value);
+    }
+    if(strcmp(key,"framesize") == 0){
+      s->set_framesize(s, static_cast<framesize_t>(value));
+    }
+    if(strcmp(key,"brightness") == 0){
+      s->set_brightness(s, value);
+    }
+
+    save_config();
   }
 private:
     camera_config_t config;
