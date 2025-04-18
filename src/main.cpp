@@ -12,6 +12,8 @@
 #include <captive_portal/captive_portal.h>
 #include <mqtt_handle.h>
 
+#include "fsm.h"
+
 #include <camera_handler.h>
 Preferences preferences;
 String unique_id;

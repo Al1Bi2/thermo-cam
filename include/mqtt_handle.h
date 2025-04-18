@@ -4,6 +4,7 @@
 #include <PubSubClient.h>
 #include "cJSON.h"
 #include "OV2640.h"
+#include "fsm.h"
 #define LASTWILL_MESSAGE "offline"
 #define LASTWILL_QOS 1
  
@@ -22,14 +23,17 @@ const int AMG8833_FREQ = 2000;
 
 SemaphoreHandle_t mut_connected;
 
-bool isConnected = false;
+volatile bool isConnected = false;
+volatile bool isActive = false;
 uint8_t notConnectedCount = 6;
 
 TaskHandle_t send_matrix_task;
 
 String CONNECT_TOPIC = String(unique_id+"/connect");
 String SETTINGS_TOPIC = String(unique_id+"/settings");
-
+String CONTROL_TOPIC = "";
+String SERVER_STATUS_TOPIC = "server/status";
+String DEVICE_STATUS_TOPIC = "";
 struct struct_message{
     char payload [500] = {'\0'};
     String topic;
@@ -72,14 +76,8 @@ void connect_mqtt(){
             ESP.restart();
         }
     }
-    CONNECT_TOPIC = String(unique_id+"/connect");
-    SETTINGS_TOPIC = String(unique_id+"/settings");
-    mqtt_client.setCallback(mqtt_callback);
-    Serial.println(mqtt_client.subscribe("server/test",1));
-    Serial.println(mqtt_client.subscribe(CONNECT_TOPIC.c_str(),0));
-    Serial.println(mqtt_client.subscribe(SETTINGS_TOPIC.c_str(),1));
-    String message = unique_id+":"+WiFi.localIP().toString();
-    Serial.println(mqtt_client.publish("discovery", message.c_str()));
+    
+
     
 }
 
@@ -130,13 +128,46 @@ void handle_message(void * parameters){
             Serial.print(incoming_message.topic);
             Serial.print(". Message: ");
             Serial.println(incoming_message.payload);
-            if(incoming_message.topic == CONNECT_TOPIC){
-                xSemaphoreTake( mut_connected, portMAX_DELAY );
-                notConnectedCount = 0;
-                isConnected = true;
-                vTaskResume(send_matrix_task);
-                xSemaphoreGive( mut_connected );
+            String msg_str = String(incoming_message.payload);
+            if(incoming_message.topic == CONTROL_TOPIC){
+                log_debug("CONTROL_TOPIC");
+                if(strcmp(incoming_message.payload, "ack-connect")==0){
+                    log_info("CONNECTED");
+                    xSemaphoreTake( sem_mqqt_busy, portMAX_DELAY );
+                    isConnected = true;
+                    vTaskSuspend(send_matrix_task);
+                    xSemaphoreGive( sem_mqqt_busy );
+                }
+                if(strcmp(incoming_message.payload, "start")==0){
+                    log_info("ACTIVE");
+                    xSemaphoreTake( sem_mqqt_busy, portMAX_DELAY );
+                    isActive = true;
+                    mqtt_client.publish(DEVICE_STATUS_TOPIC.c_str(),"active");
+                    vTaskResume(send_matrix_task);
+                    xSemaphoreGive( sem_mqqt_busy );
+                }
+                if(strcmp(incoming_message.payload,  "stop")==0){
+                    log_info("CONNECTED");
+                    xSemaphoreTake( sem_mqqt_busy, portMAX_DELAY );
+                    vTaskSuspend(send_matrix_task);
+                    mqtt_client.publish(DEVICE_STATUS_TOPIC.c_str(),"connected");
+                    isActive = false;
+                    xSemaphoreGive( sem_mqqt_busy );
+                }
+
             }
+            if(incoming_message.topic == SERVER_STATUS_TOPIC){
+                if(strcmp(incoming_message.payload,  "offline")==0 ){
+                    log_info("DISCONNECTED");
+                    xSemaphoreTake( mut_connected, portMAX_DELAY );
+                    isConnected = false;
+                    isActive = false;
+                    xSemaphoreGive( mut_connected );
+                    ESP.restart();
+                }
+            }
+
+
             if(incoming_message.topic == SETTINGS_TOPIC){
                 parse_json_and_set_settings(incoming_message.payload);
             }
@@ -179,46 +210,26 @@ void gett_matrix(void * parameters) {
     Serial.println("Matrix getter started");
     while(true){
         xEventGroupWaitBits( eg, evtADCreading, pdTRUE, pdFALSE, portMAX_DELAY );
-        Serial.println("Sending matrix");
         matrix = amg8833.get_matrix();
         xQueueOverwrite( q_matrix, (void *) &matrix );
 
     }
 }
 
-void check_connection(void * parameters) {
-    const TickType_t xFrequency = pdMS_TO_TICKS(1000);
-    const int maxNoConnection = 5;
 
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    int noConnection = 0;
-    while(true){
-        vTaskDelayUntil( &xLastWakeTime, xFrequency );
-        xSemaphoreTake( mut_connected, portMAX_DELAY );
-        notConnectedCount++;
-        if(notConnectedCount >= maxNoConnection){
-            isConnected = true;
-            Serial.println("Server dont want to connect");
-            vTaskSuspend( send_matrix_task );
-        }
-        xSemaphoreGive( mut_connected );
-    }
-
-}
 void send_matrix(void * parameters) {
     std::array<std::array<float, 8>, 8> r_matrix;
     uint64_t last_time = esp_timer_get_time();
-    uint64_t sleep_time = 200*1000;
+    uint64_t sleep_time = 100*1000;
 
     std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(cJSON_CreateObject(), cJSON_Delete);
     std::unique_ptr<cJSON, decltype(&cJSON_Delete)> matrix_array(cJSON_CreateArray(), cJSON_Delete);
     while(true){
 
         if(esp_timer_get_time() - last_time >= sleep_time){
-            Serial.println("Send matrix");
+            
             last_time = esp_timer_get_time();
             xEventGroupSetBits( eg, evtADCreading );
-            Serial.println(xEventGroupGetBits( eg ));
         }
         if(xQueueReceive(q_matrix, &r_matrix, 0) == pdTRUE){
             uint32_t t1 = micros();
@@ -239,10 +250,10 @@ void send_matrix(void * parameters) {
 
             xSemaphoreTake( sem_mqqt_busy, portMAX_DELAY );
             String topic = unique_id + "/amg8833";
-            Serial.println(sizeof(r_matrix));      
+            log_debug("Sending matrix");
             mqtt_client.publish(topic.c_str(), reinterpret_cast<const uint8_t*>(&r_matrix), sizeof(r_matrix));
             uint32_t t2 = micros();
-            Serial.printf("JSON parse: %d μs\n", t2 - t1);
+
             xSemaphoreGive( sem_mqqt_busy );
             cJSON_Delete(root);
             free(json_string);  
@@ -261,13 +272,35 @@ void setup_mqtt() {
     q_Message = xQueueCreate( 1, sizeof(struct struct_message) );
     mut_connected = xSemaphoreCreateMutex();
     Serial.printf("Size of matrix: %d\n",sizeof(std::array<std::array<float, 8>, 8>)); 
-    
-    xTaskCreatePinnedToCore(check_connection, "check_conn", 4906, NULL, 2, NULL, 1);
+    mqtt_client.setCallback(mqtt_callback);
+
+
+    SETTINGS_TOPIC = String(unique_id+"/settings");
+    mqtt_client.subscribe(SETTINGS_TOPIC.c_str(),1);
+
+    CONTROL_TOPIC = unique_id+"/control";
+    DEVICE_STATUS_TOPIC = unique_id+"/status";
+
+    mqtt_client.subscribe(SERVER_STATUS_TOPIC.c_str(),1);
+    mqtt_client.subscribe(DEVICE_STATUS_TOPIC.c_str(),1);
+    mqtt_client.subscribe(CONTROL_TOPIC.c_str(),1);
+
 
     xTaskCreatePinnedToCore(loop_mqtt, "loop_mqtt", 4906, NULL, 2, NULL, 1);
     xTaskCreatePinnedToCore(handle_message, "handle_message", 4096, NULL, 2, NULL, 1);
     xTaskCreatePinnedToCore(gett_matrix, "gett_matrix", 4096, NULL, 3, NULL, 1);
     xTaskCreatePinnedToCore(send_matrix, "send_matrix", 4096, NULL, 2, &send_matrix_task, 1);
+    vTaskSuspend(send_matrix_task);
+    xSemaphoreGive( sem_mqqt_busy );
+
+    log_debug(CONTROL_TOPIC);
+    log_debug(DEVICE_STATUS_TOPIC);
+    log_debug(SERVER_STATUS_TOPIC);
+    log_debug(SETTINGS_TOPIC);
+    String message = unique_id+":"+WiFi.localIP().toString();
+    
+
+    Serial.println(mqtt_client.publish("discovery", message.c_str()));
 
 }
 

@@ -5,7 +5,7 @@
 #include "esp_camera.h" 
 #include "esp_log.h"
 #include "esp_attr.h"
-
+#include "log.h"
 #include <driver/rtc_io.h>
 
 #include <settings/camera_pins.h>
@@ -185,6 +185,7 @@ void handle_jpeg_stream(){
 }
 
 void handle_jpeg_stream_simple(){
+    log_info("Connection to Web");
     char buf[32];
     int size = 0;
     WiFiClient* client = new WiFiClient();
