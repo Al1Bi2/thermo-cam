@@ -1,22 +1,16 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <PubSubClient.h>
-#include <Preferences.h>
-#include <WebServer.h>
 #include <esp_bt.h>
 #include <esp_wifi.h>
 #include <esp_sleep.h>
 #include <driver/rtc_io.h>
-#include <ESPmDNS.h>
 
-#include <captive_portal/captive_portal.h>
-#include <mqtt_handle.h>
 
+
+#include "fsm_builder.h"
 #include "fsm.h"
-
-#include <camera_handler.h>
-Preferences preferences;
+#include "actions.h"
 String unique_id;
+
 
 void get_unique_id(){
   String mac_id = WiFi.macAddress();
@@ -25,105 +19,108 @@ void get_unique_id(){
 }
 
 
-void browseService(const char *service, const char *proto) {
-  Serial.printf("Browsing for service _%s._%s.local. ... ", service, proto);
-  int n = MDNS.queryService(service, proto);
-  if (n == 0) {
-    Serial.println("no services found");
-  } else {
-    Serial.print(n);
-    Serial.println(" service(s) found");
-    for (int i = 0; i < n; ++i) {
-      // Print details for each service found
-      Serial.print("  ");
-      Serial.print(i + 1);
-      Serial.print(": ");
-
-      Serial.print(MDNS.txt(i,0));
-      Serial.print(" - ");
-      Serial.print(MDNS.hostname(i));
-      Serial.print(" (");
-      Serial.print(MDNS.IP(i).toString());
-      Serial.print(":");
-      Serial.print(MDNS.port(i));
-      Serial.println(")");
-
-      for(int j = 0; j < MDNS.numTxt(i); j++){
-        Serial.print(MDNS.txtKey(i, j));
-        Serial.print(" - ");
-        Serial.println(MDNS.txt(i, j));
-        Serial.print("; ");
-      }
-      Serial.println();
-    }
-  }
-  Serial.println();
-
-  
-}
-
-void find_server(){
-  if (!MDNS.begin(unique_id.c_str())) {
-    Serial.println("Error setting up MDNS responder!");
-    delay(1000);
-    ESP.restart();
-  }
-  MDNS.addService("http", "tcp", 80);
-  Serial.println("mDNS responder started");
-  
-  int n = 0;
-  int found = -1;
-  do{
-    n = MDNS.queryService("http", "tcp");
-    for (int i = 0; i < n; ++i) {
-      if(MDNS.hostname(i) == "thermocam-server") {
-        if(MDNS.IP(i)!=0){
-          found = i;
-        }else{
-          Serial.println("Strange bug: MDNS.hostname(i) == \"thermocam-server\" but MDNS.IP(i)==0.0.0.0");
-        }
-      }
-      Serial.println(MDNS.hostname(i));
-      delay(100);
-    }
-  } while(found == -1);
 
 
-  Serial.print("Found server: ");
-  Serial.println(MDNS.hostname(found));
-  Serial.print("IP: ");
-  Serial.println(MDNS.IP(found).toString());
-  WebServer server(80);
 
-  MDNS.end();
-  Serial.println("mDNS responder stopped");
-  MQTTBrokerIP = MDNS.IP(found).toString();
+constexpr std::array<Transition,15> createTransitions{
+        TransitionBuilder().from(DeviceState::INIT).on(DeviceEvent::START_CONNECTING_WIFI)
+            .to(DeviceState::WIFI_CONNECTING)
+            .action(Actions::connectWifi)
+            .build(),
+        
+        TransitionBuilder().from(DeviceState::WIFI_CONNECTING).on(DeviceEvent::WIFI_OK)
+            .to(DeviceState::IP_RESOLVING)
+            .action(Actions::resolveIP)
+            .build(),
+
+        TransitionBuilder().from(DeviceState::WIFI_CONNECTING).on(DeviceEvent::WIFI_FAIL)
+            .to(DeviceState::CAPTIVE_PORTAL)
+            .action(Actions::startCaptivePortal)
+            .build(),
+        
+        TransitionBuilder().from(DeviceState::IP_RESOLVING).on(DeviceEvent::SERVER_FOUND)
+            .to(DeviceState::MQTT_CONNECTING)
+            .action(Actions::mqttConnect)
+            .build(),
+
+        TransitionBuilder().from(DeviceState::IP_RESOLVING).on(DeviceEvent::MDNS_FAIL)
+            .to(DeviceState::INIT)
+            .action(Actions::restart)
+            .build(),
+        
+        TransitionBuilder().from(DeviceState::MQTT_CONNECTING).on(DeviceEvent::MQTT_OK)
+            .to(DeviceState::SERVER_CONNECTING)
+            .action(Actions::discoverServer)
+            .build(),
+
+        TransitionBuilder().from(DeviceState::MQTT_CONNECTING).on(DeviceEvent::MQTT_FAIL)
+            .to(DeviceState::INIT)
+            .action(Actions::restart)
+            .build(),
+                
+        TransitionBuilder().from(DeviceState::SERVER_CONNECTING).on(DeviceEvent::MQTT_ACK_CONNECT)
+            .to(DeviceState::REGISTERED)
+            .action(Actions::updateStatus)
+            .build(),
+                
+        TransitionBuilder().from(DeviceState::REGISTERED).on(DeviceEvent::MQTT_START_STREAM)
+            .to(DeviceState::ACTIVE)
+            .action(Actions::startCapture)
+            .build(),
+                        
+        TransitionBuilder().from(DeviceState::REGISTERED).on(DeviceEvent::SERVER_OFFLINE)
+            .to(DeviceState::INIT)
+            .action(Actions::restart)
+            .build(),
+
+        TransitionBuilder().from(DeviceState::ACTIVE).on(DeviceEvent::MQTT_STOP_STREAM)
+            .to(DeviceState::INIT)
+            .action(Actions::stopCapture)
+            .build(),
+
+        TransitionBuilder().from(DeviceState::ANY).on(DeviceEvent::REBOOT)
+            .to(DeviceState::INIT)
+            .action(Actions::restart)
+            .build()
+       
+};
 
 
-}
-void connection_task(void *pvParameters){
 
-}
 void setup() {
-  delay(2000);
-  Serial.begin(115200);
-  Serial.setDebugOutput(true);
-  
-  get_unique_id();
-  Serial.printf("Unique ID: %s\n", unique_id.c_str());
-  Serial.println("Start");
 
-  connectToWiFi(unique_id);
-  find_server();
-  connect_mqtt();
+    Serial.begin(115200);
+    delay(1000);
+    get_unique_id();
+    DeviceContext device;
+    device.id = unique_id;
 
-  delay(100);
-  setup_mqtt();
-  xTaskCreatePinnedToCore(streaming_task, "streaming_task", 2800, NULL, 2, NULL, 1);
+    device.server_ip = "";
+    device.wifi = WiFiClient();
+    device.mqtt_client = PubSubClient(device.wifi);
+    device.web_server = new WebServer(80);
+
+    fsm = new FSM<15>(device, createTransitions);
+
+
+
+    xTaskCreatePinnedToCore(fsm_rtos_task, "fsm_task", 4096, fsm, 2, &fsm_task_handle, 1);
+    log_info("Init start");
+    delay(1000);
+    fsm->post_event(DeviceEvent::START_CONNECTING_WIFI);
+    delay(1000);
+    fsm->post_event(DeviceEvent::WIFI_OK);
+
+    delay(1000);
+    fsm->post_event(DeviceEvent::SERVER_FOUND);
+    delay(5000);
+    fsm->post_event(DeviceEvent::SERVER_OFFLINE);
 
 
 }
 
 void loop() {
+    
+    
 }
 
