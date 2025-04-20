@@ -21,7 +21,7 @@ const int hdrLen = strlen(HEADER);
 const int bdrLen = strlen(BOUNDARY);
 const int cntLen = strlen(CTNTTYPE);
 
-OV2640 camera;
+extern OV2640 camera;
 volatile int FPS = 25;
 
 volatile size_t frame_size;   
