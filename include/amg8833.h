@@ -50,7 +50,12 @@ public:
     void init(int SDA = I2C_SDA_PIN, int SCL = I2C_SCL_PIN){
         Serial.println("Initializing I2C");
         i2c = &Wire;
-        i2c->begin(SDA, SCL, I2C_SPEED);
+        bool status = i2c->begin(SDA, SCL, I2C_SPEED);
+        if (!status) {
+            Serial.println("I2C initialization failed!");
+        } else {
+            Serial.println("I2C initialization successful!");
+        }
     }
     void reset(){
         Serial.print("Resetting sensor ... ");
