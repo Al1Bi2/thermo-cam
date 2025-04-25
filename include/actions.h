@@ -5,9 +5,11 @@
 #include "captive_portal/captive_portal.h"
 #include "fsm.h"
 #include "mqtt_handle.h"
+#include "camera_handler.h"
 namespace Actions {
 
     void connectWifi() {
+        
         lock_ctx();
         fsm->preferences.begin("wifi", false);
         String ssid = fsm->preferences.getString("ssid", "");
@@ -26,7 +28,14 @@ namespace Actions {
         if(!WiFi.isConnected()) {
             fsm->post_event(DeviceEvent::WIFI_FAIL);
         }
+
+        lock_ctx();
+        fsm->device.ip = WiFi.localIP().toString();
+        
+        unlock_ctx();
+
         fsm->post_event(DeviceEvent::WIFI_OK);
+        
 
     }
 
@@ -78,22 +87,27 @@ namespace Actions {
     }
 
     void discoverServer() {
-        xTaskCreatePinnedToCore(mqtt::loop_mqtt, "loop_mqtt", 4906, fsm, 2, NULL, 1);
-        xTaskCreatePinnedToCore(mqtt::handle_message, "handle_message", 4096, fsm, 2, NULL, 1);
+        xTaskCreatePinnedToCore(mqtt::loop_mqtt, "loop_mqtt", 4906, NULL, 2, NULL, 1);
+        xTaskCreatePinnedToCore(mqtt::handle_message, "handle_message", 4096, NULL, 2, NULL, 1);
+        log_debug("Started MQTT loop");
         mqtt::discoverServer();
     }
 
-    void updateStatus() {
-        mqtt::setup_mqtt();
+    void getReady() {
+        mqtt::get_ready();
+        xTaskCreatePinnedToCore(cam_server::mjpeg_start, "cam_server", 4906, NULL, 2, NULL, 1);
     }
 
     void startCapture() {
         mqtt::start_stream();
+        log_info("Started stream");
 
     }
 
     void stopCapture() {
         mqtt::stop_stream();
+        log_info("Stopped stream");
+
     }
 
 

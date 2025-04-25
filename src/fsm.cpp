@@ -2,12 +2,12 @@
 TaskHandle_t fsm_task_handle = nullptr;
 
 FSM<15>* fsm;
-
+DeviceContext ctx = {};
 void fsm_rtos_task(void* params) {
-    auto* fsm = static_cast<FSM<6>*>(params);
+    auto* fsm = static_cast<FSM<15>*>(params);
     while(true) {
         fsm->process_events();
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 

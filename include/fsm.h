@@ -46,7 +46,7 @@ struct DeviceContext{
     String server_ip;
     String mqtt_host;
     WiFiClient wifi;
-    PubSubClient mqtt_client;
+    PubSubClient* mqtt_client = nullptr;
     WebServer* web_server = nullptr;
     TaskHandle_t send_matrix_task;
     AMG8833 amg8833;
@@ -88,7 +88,7 @@ class FSM{
 
     void process_events() {
       DeviceEvent event;
-      Serial.println("Called check_events");
+
       while (xQueueReceive(event_queue, &event, 0) == pdTRUE) {
         log_debug("FSM: Received event: " + String(Event2Str(event)));
 
@@ -123,7 +123,7 @@ class FSM{
     }
 
     public:
-        DeviceContext& device;
+        DeviceContext device;
         Preferences preferences;
     private:
 
@@ -133,42 +133,6 @@ class FSM{
 
 
 };
-
-/*
-void handle_event(DeviceEvent evt) {
-    switch (device.state) {
-      case DeviceState::DISCONNECTED:
-        if (evt == DeviceEvent::MQTT_ACK_CONNECT) {
-          device.state = DeviceState::CONNECTED;
-          log_info("FSM: → CONNECTED");
-        }
-        break;
-  
-      case DeviceState::CONNECTED:
-        if (evt == DeviceEvent::MQTT_START_STREAM) {
-          device.state = DeviceState::ACTIVE;
-          device.mqtt.publish((device.id + "/status").c_str(), "active");
-          log_info("FSM: → ACTIVE");
-        }
-        break;
-  
-      case DeviceState::ACTIVE:
-        if (evt == DeviceEvent::MQTT_STOP_STREAM) {
-          device.state = DeviceState::CONNECTED;
-          device.mqtt.publish((device.id + "/status").c_str(), "connected");
-          log_info("FSM: → CONNECTED");
-        }
-        break;
-    }
-  
-    if (evt == DeviceEvent::SERVER_OFFLINE) {
-      if (device.state == DeviceState::ACTIVE){}
-        //stop_stream();
-      device.state = DeviceState::DISCONNECTED;
-      log_info("FSM: → DISCONNECTED");
-    }
-  }
-  */
 
 extern TaskHandle_t fsm_task_handle;
 void fsm_rtos_task(void* params);
@@ -186,5 +150,5 @@ void fsm_task_wrapper(void* params) {
     fsm_task(*fsm);
 }
 
-
+extern DeviceContext ctx;
 extern FSM<15>* fsm;
