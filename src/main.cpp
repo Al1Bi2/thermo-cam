@@ -23,8 +23,8 @@ String get_unique_id(){
 
 
 
-constexpr std::array<Transition,15> createTransitions{
-        TransitionBuilder().from(DeviceState::INIT).on(DeviceEvent::START_CONNECTING_WIFI)
+constexpr std::array<Transition,11> createTransitions{
+        TransitionBuilder().from(DeviceState::INIT).on(DeviceEvent::BOOT_STARTED)
             .to(DeviceState::WIFI_CONNECTING)
             .action(Actions::connectWifi)
             .build(),
@@ -68,24 +68,14 @@ constexpr std::array<Transition,15> createTransitions{
             .to(DeviceState::ACTIVE)
             .action(Actions::startCapture)
             .build(),
-                        
-        TransitionBuilder().from(DeviceState::REGISTERED).on(DeviceEvent::SERVER_OFFLINE)
-            .to(DeviceState::INIT)
-            .action(Actions::restart)
-            .build(),
 
         TransitionBuilder().from(DeviceState::ACTIVE).on(DeviceEvent::MQTT_STOP_STREAM)
             .to(DeviceState::REGISTERED)
             .action(Actions::stopCapture)
             .build(),
-        
-        TransitionBuilder().from(DeviceState::ACTIVE).on(DeviceEvent::SERVER_OFFLINE)
-            .to(DeviceState::INIT)
-            .action(Actions::restart)
-            .build(),
 
         TransitionBuilder().from(DeviceState::ANY).on(DeviceEvent::REBOOT)
-            .to(DeviceState::INIT)
+            .to(DeviceState::REBOOTING)
             .action(Actions::restart)
             .build()
        
@@ -104,17 +94,19 @@ void setup() {
     ctx.mqtt_client = nullptr;
     ctx.web_server = nullptr;
 
-    fsm = new FSM<15>(ctx, createTransitions);
+    fsm = new FSM<11>(ctx, createTransitions);
     lock_ctx();
     fsm->device.id = get_unique_id();
+
     unlock_ctx();
     Serial.println("Device ID: " + fsm->device.id);
     cam_server::camera_setup();
+    mqtt::setup_amg8833();
 
     xTaskCreatePinnedToCore(fsm_rtos_task, "fsm_task", 4096, fsm, 2, &fsm_task_handle, 1);
     log_info("Init start");
 
-    fsm->post_event(DeviceEvent::START_CONNECTING_WIFI);
+    fsm->post_event(DeviceEvent::BOOT_STARTED);
 
 
 }

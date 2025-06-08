@@ -18,7 +18,7 @@ const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"rawliteral(
         <input type='submit' value='Save'>
     </form>
     )rawliteral";
-
+const String IP = "192.168.0.1";
 
 
 void handleRoot() {
@@ -32,8 +32,8 @@ void handleSave() {
     String pass = fsm->device.web_server->arg("pass");
 
     if (ssid.length() > 0 && pass.length() > 0) {
-        fsm->preferences.putString("ssid", ssid);
-        fsm->preferences.putString("pass", pass);
+        fsm->device.preferences.putString("ssid", ssid);
+        fsm->device.preferences.putString("pass", pass);
         fsm->device.web_server->send(200, "text/html", "Настройки сохранены! Перезагрузка...");
         delay(1000);
         fsm->post_event(DeviceEvent::REBOOT);
@@ -47,7 +47,7 @@ void startCaptivePortal() {
     lock_ctx();
     String id = fsm->device.id;
     unlock_ctx();
-    WiFi.softAPConfig(IPAddress(192, 168, 0, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
+    WiFi.softAPConfig(IPAddress().fromString(IP), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
     WiFi.softAP(id);
     log_info("Ip address: " + WiFi.softAPIP().toString());
     MDNS.begin(localIPURL);

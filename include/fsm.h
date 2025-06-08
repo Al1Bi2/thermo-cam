@@ -6,6 +6,7 @@
 #include <map>
 #include "global_sync.h"
 #include "amg8833.h"
+#include "ov2640.h"
 #include <Preferences.h>
 
 enum class DeviceState{
@@ -17,20 +18,19 @@ enum class DeviceState{
     SERVER_CONNECTING,
     REGISTERED,
     ACTIVE,
+    REBOOTING,
     ANY
 };
 
 
 enum class DeviceEvent{
-    START_CONNECTING_WIFI,
+    BOOT_STARTED,
     WIFI_OK,
     WIFI_FAIL,
     SERVER_FOUND,
     MDNS_FAIL,
-    SERVER_NOT_FOUND,
     MQTT_OK,
     MQTT_FAIL,
-    SERVER_OFFLINE,
     MQTT_ACK_CONNECT,
     MQTT_START_STREAM,
     MQTT_STOP_STREAM,
@@ -50,6 +50,8 @@ struct DeviceContext{
     WebServer* web_server = nullptr;
     TaskHandle_t send_matrix_task;
     AMG8833 amg8833;
+    OV2640 camera;
+    Preferences preferences;
     bool streaming = false;
 };
 
@@ -93,7 +95,7 @@ class FSM{
         log_debug("FSM: Received event: " + String(Event2Str(event)));
 
 
-        lock_ctx();
+
 
         Serial.println("FSM: Current state: " + String(State2Str(current_state)));
         Serial.println("FSM: New event: " + String(Event2Str(event)));
@@ -105,14 +107,13 @@ class FSM{
 
         if(it == transitions.end()) {
             log_debug("FSM: No transition found");
-            unlock_ctx();
             continue;
         }
 
         DeviceState new_state = it->to;
         current_state = new_state;
         Serial.println("FSM: New state: " + String(State2Str(current_state)));
-        unlock_ctx();
+
         
         it->action();
       }
@@ -124,7 +125,6 @@ class FSM{
 
     public:
         DeviceContext device;
-        Preferences preferences;
     private:
 
         std::array<Transition,N> transitions;
@@ -151,4 +151,4 @@ void fsm_task_wrapper(void* params) {
 }
 
 extern DeviceContext ctx;
-extern FSM<15>* fsm;
+extern FSM<11>* fsm;

@@ -6,19 +6,17 @@
 #include "OV2640.h"
 #include "fsm.h"
 #include "log.h"
+#include "global_sync.h"
 
 #define LASTWILL_MESSAGE "offline"
 #define LASTWILL_QOS 1
-extern OV2640 camera;
+
 
 namespace mqtt{
 
-#define evtADCreading      ( 1 << 3 )
-EventGroupHandle_t eg; // variable for the event group handle
 
 const int PAYLOAD_LEN = 1024;
 
-AMG8833 amg8833;
 
 
 const int AMG8833_FREQ = 100;
@@ -40,7 +38,7 @@ struct struct_message{
 } incoming_message;
 
 QueueHandle_t q_Message;
-QueueHandle_t q_matrix;
+
 
 SemaphoreHandle_t sem_mqqt_busy;
 
@@ -83,7 +81,7 @@ void parse_json_and_set_settings(const char* message){
         cJSON* item = camera_obj->child; // Получаем первый элемент объекта "camera"
         while (item) {
             if (cJSON_IsNumber(item)) { // Проверяем, что значение – число
-                ::camera.set_settings(item->string, item->valueint);
+                fsm->device.camera.set_settings(item->string, item->valueint);
             }
             item = item->next; // Переходим к следующему ключу
         }
@@ -95,7 +93,9 @@ void parse_json_and_set_settings(const char* message){
         cJSON* item = amg8833_obj->child;
         while (item) {
             if (cJSON_IsNumber(item)) {
-                amg8833.set_settings(item->string, item->valueint);
+                lock_ctx();
+                fsm->device.amg8833.set_settings(item->string, item->valueint);
+                unlock_ctx();
             }
             item = item->next;
         }
@@ -139,7 +139,7 @@ void handle_message(void * parameters){
             if(incoming_message.topic == SERVER_STATUS_TOPIC){
                 if(strcmp(incoming_message.payload,  "offline")==0 ){
                     log_info("offline");
-                    fsm->post_event(DeviceEvent::SERVER_OFFLINE);
+                    fsm->post_event(DeviceEvent::REBOOT);
                 }
             }
 
@@ -155,7 +155,7 @@ void handle_message(void * parameters){
 void loop_mqtt(void * parameters) {
     Serial.println("MQTT loop started");
 
-    xSemaphoreGive(sem_mqqt_busy);
+    //xSemaphoreGive(sem_mqqt_busy);
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(500); 
     while(true){
@@ -170,51 +170,40 @@ void loop_mqtt(void * parameters) {
 }
 
 
-void gett_matrix(void * parameters) {
-
-    std::array<std::array<float, 8>, 8> matrix;// увеличивает потребление памяти, надо поискать в инете норм ли x3
-    Serial.println("Matrix getter started");
-    while(true){
-        xEventGroupWaitBits( eg, evtADCreading, pdTRUE, pdFALSE, portMAX_DELAY );
-        matrix = fsm->device.amg8833.get_matrix();
-        xQueueOverwrite( q_matrix, (void *) &matrix );
-
-    }
-}
-
 
 void send_matrix(void * parameters) {
-    std::array<std::array<float, 8>, 8> r_matrix;
+    std::array<std::array<float, 8>, 8> matrix;
     uint64_t last_time = esp_timer_get_time();
-    uint64_t sleep_time = AMG8833_FREQ*1000;
+    uint64_t sleep_time = AMG8833_FREQ;
 
     std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(cJSON_CreateObject(), cJSON_Delete);
     std::unique_ptr<cJSON, decltype(&cJSON_Delete)> matrix_array(cJSON_CreateArray(), cJSON_Delete);
     log_debug("Send matrix started");
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(sleep_time); 
     while(true){
 
-        if(esp_timer_get_time() - last_time >= sleep_time){
-            
-            last_time = esp_timer_get_time();
-            xEventGroupSetBits( eg, evtADCreading );
-        }
-        if(xQueueReceive(q_matrix, &r_matrix, 0) == pdTRUE){
-            
+            matrix = fsm->device.amg8833.get_matrix();
             xSemaphoreTake( sem_mqqt_busy, portMAX_DELAY );
-            fsm->device.mqtt_client->publish(AMG8833_TOPIC.c_str(), reinterpret_cast<const uint8_t*>(&r_matrix), sizeof(r_matrix));
+            fsm->device.mqtt_client->publish(AMG8833_TOPIC.c_str(), reinterpret_cast<const uint8_t*>(&matrix), sizeof(matrix));
             xSemaphoreGive( sem_mqqt_busy );
 
-        }
-            
+       
         taskYIELD();
+        vTaskDelayUntil( &xLastWakeTime, xFrequency );
     }
 
 }
 void setup_amg8833() {
-
-    fsm->device.amg8833.init(); //shiiiiiiet
+    lock_ctx();
+    bool status =fsm->device.amg8833.init(); 
+    if(!status){
+        unlock_ctx();
+        fsm->post_event(DeviceEvent::REBOOT);
+    }
     fsm->device.amg8833.reset();
     fsm->device.amg8833.set_framerate(FRAMERATE::FPS_10);
+    unlock_ctx();
 }
 void update_topic_names(){
     lock_ctx();
@@ -226,9 +215,10 @@ void update_topic_names(){
     AMG8833_TOPIC = id+"/amg8833";
 }
 void get_ready() {
-    vTaskDelete(discovery_task_handle);
-    setup_amg8833();
-    xTaskCreatePinnedToCore(gett_matrix, "gett_matrix", 4096, NULL, 3, NULL, 1);
+    lock_mqtt();
+    //vTaskDelete(discovery_task_handle);
+    
+    unlock_mqtt();
     xTaskCreatePinnedToCore(send_matrix, "send_matrix", 4096, NULL, 2, &send_matrix_task, 1);
 
     xSemaphoreTake( sem_mqqt_busy, portMAX_DELAY );
@@ -297,10 +287,7 @@ void connectMqtt(){
     fsm->device.mqtt_client->setCallback(mqtt_callback);
 
     q_Message = xQueueCreate( 1, sizeof(struct struct_message) );
-    eg = xEventGroupCreate();
-    q_matrix = xQueueCreate( 1, sizeof(std::array<std::array<float, 8>, 8>) );
-    
-    
+   
 
     fsm->device.mqtt_client->subscribe(SETTINGS_TOPIC.c_str(),1);
     fsm->device.mqtt_client->subscribe(DEVICE_STATUS_TOPIC.c_str(),1);
@@ -310,25 +297,19 @@ void connectMqtt(){
     fsm->post_event(DeviceEvent::MQTT_OK);
 }
 
-void discover_loop(void * parameters){
+
+
+void discoverServer(){
     lock_ctx();
     String id = fsm->device.id;
     String ip = fsm->device.ip;
     unlock_ctx();
     String message = id+":"+ip;
     log_info(message);
-    Serial.println("Discovery loop started");
-    while(true){
-        fsm->device.mqtt_client->publish(DISCOVERY_TOPIC.c_str(), message.c_str());
-        vTaskDelay(5000/portTICK_PERIOD_MS); 
-    }
-}
-
-void discoverServer(){
-
-    xTaskCreatePinnedToCore(discover_loop, "discover_loop", 4096, NULL, 2, &discovery_task_handle, 1);
-    
-
+    Serial.println("Discovery  started");
+    lock_mqtt();
+    fsm->device.mqtt_client->publish(DISCOVERY_TOPIC.c_str(), message.c_str());
+    unlock_mqtt();
 
 }
 

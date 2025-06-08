@@ -11,12 +11,13 @@ namespace Actions {
     void connectWifi() {
         
         lock_ctx();
-        fsm->preferences.begin("wifi", false);
-        String ssid = fsm->preferences.getString("ssid", "");
-        String pass = fsm->preferences.getString("pass", "");
+        fsm->device.preferences.begin("wifi", false);
+        String ssid = fsm->device.preferences.getString("ssid", "");
+        String pass = fsm->device.preferences.getString("pass", "");
         unlock_ctx();
         if(ssid.length() == 0) {
             fsm->post_event(DeviceEvent::WIFI_FAIL);
+            return;
         }
         log_debug("Connecting to WiFi...");
 
@@ -27,6 +28,7 @@ namespace Actions {
         }
         if(!WiFi.isConnected()) {
             fsm->post_event(DeviceEvent::WIFI_FAIL);
+            return;
         }
 
         lock_ctx();
@@ -35,8 +37,7 @@ namespace Actions {
         unlock_ctx();
 
         fsm->post_event(DeviceEvent::WIFI_OK);
-        
-
+        return;
     }
 
     void resolveIP() {
@@ -74,6 +75,7 @@ namespace Actions {
 
         mdns_free();
         fsm->post_event(DeviceEvent::SERVER_FOUND);
+        return;
     }
 
     void startCaptivePortal(){
@@ -95,7 +97,7 @@ namespace Actions {
 
     void getReady() {
         mqtt::get_ready();
-        xTaskCreatePinnedToCore(cam_server::mjpeg_start, "cam_server", 4906, NULL, 2, NULL, 1);
+        cam_server::mjpeg_start();
     }
 
     void startCapture() {

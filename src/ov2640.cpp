@@ -28,8 +28,7 @@ camera_config_t default_config{
   
     .pixel_format = PIXFORMAT_JPEG,  // for streaming
     .frame_size = FRAMESIZE_VGA,
-  
-    .jpeg_quality = 12,
+    .jpeg_quality = 4,
     .fb_count = 2,
     .fb_location = CAMERA_FB_IN_PSRAM,
   

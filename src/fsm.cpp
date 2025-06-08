@@ -1,10 +1,10 @@
 #include "fsm.h"
 TaskHandle_t fsm_task_handle = nullptr;
 
-FSM<15>* fsm;
+FSM<11>* fsm;
 DeviceContext ctx = {};
 void fsm_rtos_task(void* params) {
-    auto* fsm = static_cast<FSM<15>*>(params);
+    auto* fsm = static_cast<FSM<11>*>(params);
     while(true) {
         fsm->process_events();
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -37,8 +37,8 @@ const char* State2Str(DeviceState state){
 }
 const char* Event2Str(DeviceEvent event){
     switch(event){
-        case DeviceEvent::START_CONNECTING_WIFI:
-            return "START_CONNECTING_WIFI";
+        case DeviceEvent::BOOT_STARTED:
+            return "BOOT_STARTED";
         case DeviceEvent::WIFI_OK:
             return "WIFI_OK";
         case DeviceEvent::WIFI_FAIL:    
@@ -47,12 +47,8 @@ const char* Event2Str(DeviceEvent event){
             return "SERVER_FOUND";
         case DeviceEvent::MDNS_FAIL:
             return "MDNS_FAIL";
-        case DeviceEvent::SERVER_NOT_FOUND:
-            return "SERVER_NOT_FOUND";
         case DeviceEvent::MQTT_OK:
             return "MQTT_OK";
-        case DeviceEvent::SERVER_OFFLINE:
-            return "SERVER_OFFLINE";
         case DeviceEvent::MQTT_ACK_CONNECT:
             return "MQTT_ACK_CONNECT";
         case DeviceEvent::MQTT_START_STREAM:

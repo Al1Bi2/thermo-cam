@@ -23,14 +23,12 @@ const int hdrLen = strlen(HEADER);
 const int bdrLen = strlen(BOUNDARY);
 const int cntLen = strlen(CTNTTYPE);
 
-extern OV2640 camera;
+
 namespace cam_server{
     
     extern volatile int FPS;
     extern volatile size_t frame_size;   
     extern volatile uint8_t* frame_buffer;    
-
-    uint8_t* allocate_memory(uint8_t* requested_ptr, size_t requested_size);
 
     void camera_setup();
 
@@ -41,6 +39,6 @@ namespace cam_server{
     void loop_server(void* pvParameters); 
 
 
-    void mjpeg_start(void* pvParameters );
+    void mjpeg_start() ;
 
 }

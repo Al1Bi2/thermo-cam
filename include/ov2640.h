@@ -20,7 +20,7 @@ public:
         printf("Camera probe failed with error 0x%x", err);
         return err;
     }
-    load_config();
+    //load_config();
     return ESP_OK;
   }
   void run(){
@@ -29,34 +29,25 @@ public:
     }
     fb = esp_camera_fb_get();
   }
-  void run_with_check(){
-    if(!fb){
-      run();
-    }
-  }
+
 
   size_t get_fb_size(){
-    run_with_check();
+    run();
     return fb->len;
   }
-  std::array<uint8_t,2> get_size(){
-    std::array<uint8_t,2> size;
-    size[0] = fb->width;
-    size[1] = fb->height;
-    return size;
-  }
-  uint8_t get_height(){
-    run_with_check();
-    return static_cast<uint8_t>(fb->height);
+
+  size_t get_height(){
+    run();
+    return fb->height;
   }
 
-  uint8_t get_width(){
-    run_with_check();
-    return static_cast<uint8_t>(fb->width);
+  size_t get_width(){
+    run();
+    return fb->width;
   }
 
   uint8_t* get_buffer(){
-    run_with_check();
+    run();
     return fb->buf;
   }
   void free_buffer(){
@@ -68,11 +59,21 @@ public:
   void load_config(){
     esp_camera_load_from_nvs("OV2640");
   }
-  framesize_t get_frame_size(){
-    return config.frame_size;
-  }
-  void set_frame_size(framesize_t frame_size){
-    config.frame_size = frame_size;
+  int get_settings(const char* key){
+      sensor_t* s = esp_camera_sensor_get();
+      camera_status_t status = s->status;
+      if(strcmp(key,"quality") == 0){
+        status.quality;
+      }
+      if(strcmp(key,"framesize") == 0){
+        status.framesize;
+      }
+      if(strcmp(key,"brightness") == 0){
+        status.brightness;
+      }
+      else {
+        return -1;
+      }
   }
   void set_settings(const char* key,int value){
     sensor_t* s = esp_camera_sensor_get();

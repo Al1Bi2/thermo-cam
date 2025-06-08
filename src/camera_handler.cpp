@@ -1,5 +1,5 @@
 #include "camera_handler.h"
-OV2640 camera = OV2640();
+
 
 volatile int cam_server::FPS = 25;
 volatile size_t cam_server::frame_size;   
@@ -16,9 +16,11 @@ void cam_server::handle_jpeg_stream_simple(){
     client->write(HEADER, hdrLen);
     while(true){
         if (!client->connected()) break;
-        camera.run();
-        int size = camera.get_fb_size();
-        const uint8_t* buffer = camera.get_buffer();
+        lock_ctx();
+        fsm->device.camera.run();
+        int size =  fsm->device.camera.get_fb_size();
+        const uint8_t* buffer =  fsm->device.camera.get_buffer();
+        unlock_ctx();
 
         client->printf("--%s\r\n", BOUNDARY);
         client->write(CTNTTYPE, cntLen);
@@ -43,33 +45,13 @@ void cam_server::loop_server(void* pvParameters){
 }
 
 void cam_server::camera_setup(){
-    if (camera.init() != ESP_OK) {
+    if (fsm->device.camera.init() != ESP_OK) {
         Serial.println("Error initializing the camera");
         delay(1000);
         fsm->post_event(DeviceEvent::REBOOT);
     }
 }
 
-uint8_t* cam_server::allocate_memory(uint8_t* requested_ptr, size_t requested_size){
-    if(requested_ptr!=NULL){
-        free(requested_ptr);
-    }
-    size_t free_heap = esp_get_free_heap_size();
-    uint8_t* new_ptr = NULL;
-
-    if( requested_size > free_heap*3/4){
-        if(psramFound() && ESP.getFreePsram() > requested_size){
-            new_ptr = (uint8_t*) ps_malloc(requested_size);
-        }
-    }else{
-        new_ptr = (uint8_t*) malloc(requested_size);
-    }
-
-    if(new_ptr == NULL){
-        ESP.restart();
-    }
-    return new_ptr;
-}
 
 void cam_server::handleNotFound()
 {
@@ -84,12 +66,12 @@ void cam_server::handleNotFound()
     fsm->device.web_server->send(200, "text / plain", message);
 }
 
-void cam_server::mjpeg_start(void* pvParameters ){
-    camera_setup();       
+void cam_server::mjpeg_start(){
+    //camera_setup();       
     log_info("Starting MJPEG server");
 
 
-    const TickType_t xFrequency = pdMS_TO_TICKS(100);
+    const TickType_t xFrequency = pdMS_TO_TICKS(10);
 
     lock_ctx();
     if(fsm->device.web_server != nullptr){
@@ -99,15 +81,9 @@ void cam_server::mjpeg_start(void* pvParameters ){
     unlock_ctx();
     
     fsm->device.web_server->on("/mjpeg/1", HTTP_GET, handle_jpeg_stream_simple);
+    fsm->device.web_server->onNotFound(handleNotFound);
     fsm->device.web_server->begin();
     log_info("Server loop started");
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    while(true) {
-        //Serial.println("CH:Looping");
-        fsm->device.web_server->handleClient();
-        //taskYIELD();
-        //vTaskDelayUntil(&xLastWakeTime, xFrequency);
-    }
-
-
+    xTaskCreatePinnedToCore(cam_server::loop_server, "cam_server", 4906, NULL, 2, NULL, 1);
 }
+
